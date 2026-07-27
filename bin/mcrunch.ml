@@ -101,11 +101,6 @@ let run _quiet cfg filenames output checksums =
   Fun.protect ~finally @@ fun () ->
   protects ~finallies @@ fun () ->
   let fn (filename, name) =
-    let name =
-      match name with
-      | None -> filename_to_name filename
-      | Some name -> name
-    in
     let hs = List.map (fun h -> h name) hs in
     Fmt.pf ppf "let %s = @[<hov>%a@]\n%!" name (pp cfg hs) filename;
   in
@@ -150,12 +145,10 @@ let parser_of_arg str =
   | [] -> assert false
   | [ filename ] ->
       let* () = existing_filename filename in
-      let* () = safe_filename_as_name filename in
       Ok (filename, None)
   | "-" :: filename ->
       let filename = String.concat ":" filename in
       let* () = existing_filename filename in
-      let* () = safe_filename_as_name filename in
       Ok (filename, None)
   | name :: filename ->
       let filename = String.concat ":" filename in
@@ -169,18 +162,34 @@ let pp_of_arg ppf = function
       else Fmt.pf ppf "-:%s" filename
   | filename, Some name -> Fmt.pf ppf "%s:%s" name filename
 
+(* A file given without an explicit name is reached through the binding named
+   after it, so its filename has to be usable as an OCaml identifier. *)
+let resolve_name (filename, name) =
+  let ( let* ) = Result.bind in
+  match name with
+  | Some name -> Ok (filename, name)
+  | None ->
+      let* () = safe_filename_as_name filename in
+      Ok (filename, filename_to_name filename)
+
 let setup_filenames filenames =
-  let fn = function
-    | _, Some name -> name
-    | filename, None -> filename_to_name filename
+  let ( let* ) = Result.bind in
+  let* filenames =
+    List.fold_left
+      (fun acc filename ->
+        let* acc = acc in
+        let* filename = resolve_name filename in
+        Ok (filename :: acc))
+      (Ok []) filenames
+    |> Result.map List.rev
   in
-  let names = List.map fn filenames in
   let rec has_duplicate = function
     | [] -> false
     | x :: r -> List.mem x r || has_duplicate r
   in
-  if has_duplicate names then error_msgf "Found some duplications on names"
-  else if List.is_empty names then error_msgf "No file specified to crunch"
+  if has_duplicate (List.map snd filenames) then
+    error_msgf "Found some duplications on names"
+  else if List.is_empty filenames then error_msgf "No file specified to crunch"
   else Ok filenames
 
 let filenames =
