@@ -1,5 +1,8 @@
 let error_msgf fmt = Fmt.kstr (fun msg -> Error (`Msg msg)) fmt
-let to_underscore = function '.' | '%' | '!' | '?' | ':' -> true | _ -> false
+
+let to_underscore = function
+  | '.' | '%' | '!' | '?' | ':' | '/' -> true
+  | _ -> false
 
 let no_colon str =
   String.exists (function '-' -> true | _ -> false) str |> Bool.not
@@ -127,6 +130,31 @@ let safe_filename_as_name filename =
   then Ok ()
   else error_msgf "%s is not a safe filename" filename
 
+let has_extension exts filename =
+  match exts with
+  | [] -> true
+  | exts ->
+      let extension = Filename.extension filename in
+      List.exists (fun ext -> String.equal ext extension) exts
+
+(* Entries are sorted so that the generated module only depends on the contents
+   of the directory, not on the order the file-system happens to return it in. *)
+let rec fold_directory exts fn acc directory =
+  let entries = Sys.readdir directory in
+  Array.sort String.compare entries;
+  Array.fold_left
+    (fun acc entry ->
+      let filename = Filename.concat directory entry in
+      if Sys.is_directory filename then fold_directory exts fn acc filename
+      else if Sys.is_regular_file filename && has_extension exts filename then
+        fn acc filename
+      else acc)
+    acc entries
+
+let filenames_of_directory exts directory =
+  fold_directory exts (fun acc filename -> (filename, None) :: acc) [] directory
+  |> List.rev
+
 let safe_name name =
   let fn0 = function 'a' .. 'z' | '_' -> true | _ -> false in
   let fn1 = function
@@ -172,8 +200,12 @@ let resolve_name (filename, name) =
       let* () = safe_filename_as_name filename in
       Ok (filename, filename_to_name filename)
 
-let setup_filenames filenames =
+let setup_filenames filenames directories exts =
   let ( let* ) = Result.bind in
+  let filenames =
+    filenames
+    @ List.concat_map (filenames_of_directory exts) directories
+  in
   let* filenames =
     List.fold_left
       (fun acc filename ->
@@ -205,9 +237,41 @@ let filenames =
   & opt_all (conv (parser_of_arg, pp_of_arg)) []
   & info [ "f"; "file" ] ~doc ~docv:"[NAME|-:]FILENAME"
 
+let directories =
+  let doc =
+    "A directory to $(i,crunch) into the OCaml output file. It is walked \
+     recursively and every regular file found is crunched as if it was given \
+     with $(b,--file), using the path $(tname) walked to it (including \
+     $(i,DIRECTORY) itself) to infer the OCaml name. This option can be \
+     repeated."
+  in
+  let parser directory =
+    if Sys.file_exists directory && Sys.is_directory directory then Ok directory
+    else error_msgf "%s is not a directory" directory
+  in
+  let open Arg in
+  value
+  & opt_all (conv (parser, Fmt.string)) []
+  & info [ "d"; "directory" ] ~doc ~docv:"DIRECTORY"
+
+let exts =
+  let doc =
+    "Only crunch the files with this extension when walking a $(b,--directory). \
+     The leading $(i,.) is optional. If the option is not given, every file is \
+     crunched. This option can be repeated."
+  in
+  let parser ext =
+    if ext <> "" && ext.[0] = '.' then Ok ext else Ok ("." ^ ext)
+  in
+  let open Arg in
+  value
+  & opt_all (conv (parser, Fmt.string)) []
+  & info [ "e"; "ext" ] ~doc ~docv:"EXTENSION"
+
 let setup_filenames =
   let open Term in
-  term_result ~usage:false (const setup_filenames $ filenames)
+  term_result ~usage:false
+    (const setup_filenames $ filenames $ directories $ exts)
 
 let output_options = "OUTPUT OPTIONS"
 
