@@ -70,7 +70,7 @@ let protects ~finallies work =
       Fun.protect ~finally work)
     finallies work ()
 
-let run _quiet cfg filenames output checksums =
+let run _quiet cfg (lookup, filenames) output checksums =
   let ppf_finally_of_filename filename =
     let oc = open_out_bin filename in
     let ppf = Format.formatter_of_out_channel oc in
@@ -107,7 +107,16 @@ let run _quiet cfg filenames output checksums =
     let hs = List.map (fun h -> h name) hs in
     Fmt.pf ppf "let %s = @[<hov>%a@]\n%!" name (pp cfg hs) filename;
   in
-  List.iter fn filenames
+  List.iter fn filenames;
+  match lookup with
+  | None -> ()
+  | Some lookup ->
+      Fmt.pf ppf "\nlet %s = function\n" lookup;
+      List.iter
+        (fun (filename, name) ->
+          Fmt.pf ppf "  | %S -> Some %s\n" filename name)
+        filenames;
+      Fmt.pf ppf "  | _ -> None\n%!"
 
 let existing_filename filename =
   if Sys.is_regular_file filename then Ok ()
@@ -191,16 +200,19 @@ let pp_of_arg ppf = function
   | filename, Some name -> Fmt.pf ppf "%s:%s" name filename
 
 (* A file given without an explicit name is reached through the binding named
-   after it, so its filename has to be usable as an OCaml identifier. *)
-let resolve_name (filename, name) =
+   after it, so its filename has to be usable as an OCaml identifier.
+   With a lookup function, the contents are reached by filename instead, so we
+   are free to name the bindings ourselves and any filename will do. *)
+let resolve_name lookup idx (filename, name) =
   let ( let* ) = Result.bind in
-  match name with
-  | Some name -> Ok (filename, name)
-  | None ->
+  match (name, lookup) with
+  | Some name, _ -> Ok (filename, name)
+  | None, Some _ -> Ok (filename, Fmt.str "d_%d" idx)
+  | None, None ->
       let* () = safe_filename_as_name filename in
       Ok (filename, filename_to_name filename)
 
-let setup_filenames filenames directories exts =
+let setup_filenames lookup filenames directories exts =
   let ( let* ) = Result.bind in
   let filenames =
     filenames
@@ -210,7 +222,7 @@ let setup_filenames filenames directories exts =
     List.fold_left
       (fun acc filename ->
         let* acc = acc in
-        let* filename = resolve_name filename in
+        let* filename = resolve_name lookup (List.length acc) filename in
         Ok (filename :: acc))
       (Ok []) filenames
     |> Result.map List.rev
@@ -221,8 +233,10 @@ let setup_filenames filenames directories exts =
   in
   if has_duplicate (List.map snd filenames) then
     error_msgf "Found some duplications on names"
+  else if Option.is_some lookup && has_duplicate (List.map fst filenames) then
+    error_msgf "Found some duplications on filenames"
   else if List.is_empty filenames then error_msgf "No file specified to crunch"
-  else Ok filenames
+  else Ok (lookup, filenames)
 
 let filenames =
   let doc =
@@ -268,10 +282,30 @@ let exts =
   & opt_all (conv (parser, Fmt.string)) []
   & info [ "e"; "ext" ] ~doc ~docv:"EXTENSION"
 
+let lookup =
+  let doc =
+    "Also emit a function mapping each crunched filename to its contents, so \
+     that they can be reached by name at run-time instead of through the \
+     bindings $(tname) infers. The function is called $(i,read) unless \
+     $(i,NAME) says otherwise, and returns an $(i,option). In this mode \
+     $(tname) names the bindings of the files given without an explicit name \
+     itself, which lifts the restriction that such a filename must be usable \
+     as an OCaml identifier."
+  in
+  let ( let* ) = Result.bind in
+  let parser name =
+    let* () = safe_name name in
+    Ok name
+  in
+  let open Arg in
+  value
+  & opt ~vopt:(Some "read") (some (conv (parser, Fmt.string))) None
+  & info [ "lookup" ] ~doc ~docv:"NAME"
+
 let setup_filenames =
   let open Term in
   term_result ~usage:false
-    (const setup_filenames $ filenames $ directories $ exts)
+    (const setup_filenames $ lookup $ filenames $ directories $ exts)
 
 let output_options = "OUTPUT OPTIONS"
 

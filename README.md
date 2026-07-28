@@ -55,6 +55,12 @@ $ mcrunch -f -:path:to:file
 * `-e`, `--ext EXTENSION` restricts `--directory` to the files carrying this
   extension. The leading `.` is optional. This option can be repeated. Without
   it, every file is crunched.
+* `--lookup [NAME]` also emits a function mapping each crunched filename to its
+  contents, so that they can be reached by name at run-time rather than through
+  the bindings `mcrunch` infers. It is called `read` unless `NAME` says
+  otherwise, and returns an `option`. In this mode `mcrunch` names the bindings
+  of the files given without an explicit name itself, so their filenames no
+  longer have to be usable as OCaml identifiers.
 * `-o`, `--output FILENAME` writes the output to the given file instead of
   stdout. The file must not already exist. Use `-` for stdout (the default).
 * `-a`, `--array` serializes each file's contents as an array of strings. This
@@ -105,3 +111,21 @@ $ mcrunch -d static -e html -e css -o static.ml
 let static_index_html = [| … |]
 let static_style_css = [| … |]
 ```
+
+When the file to serve is only known at run-time, `--lookup` gives the module a
+function to reach it by path, and lets `mcrunch` name the bindings so that any
+filename can be crunched:
+
+```bash
+$ mcrunch -d static -s --lookup -o static.ml
+let d_0 = "…"
+let d_1 = "…"
+
+let read = function
+  | "static/index.html" -> Some d_0
+  | "static/style.css" -> Some d_1
+  | _ -> None
+```
+
+With `--string`, `read` hands back the string literal itself: nothing is
+concatenated or copied, and the contents stay where the linker put them.
