@@ -1,3 +1,5 @@
+  $ export NO_COLOR=1
+
 A directory is walked recursively, in a stable order, and the path is used to
 infer the OCaml name:
 
@@ -39,9 +41,9 @@ So is a directory that does not exist, or that is not a directory:
 
   $ mcrunch --directory nope
   Usage: mcrunch [--help] [OPTION]…
-  mcrunch: option --directory: nope is not a directory
+  mcrunch: option '--directory': nope is not a directory
   [124]
   $ mcrunch --directory assets/foo.txt
   Usage: mcrunch [--help] [OPTION]…
-  mcrunch: option --directory: assets/foo.txt is not a directory
+  mcrunch: option '--directory': assets/foo.txt is not a directory
   [124]

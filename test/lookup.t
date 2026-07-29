@@ -1,3 +1,5 @@
+  $ export NO_COLOR=1
+
 --lookup emits a function from filename to contents, next to the bindings:
 
   $ echo "foo" > foo.txt
@@ -64,5 +66,5 @@ A lookup function that is not a valid OCaml identifier is rejected:
 
   $ mcrunch --file=foo.txt --lookup=Read
   Usage: mcrunch [--help] [OPTION]…
-  mcrunch: option --lookup: Read is not a safe name
+  mcrunch: option '--lookup': Read is not a safe name
   [124]
